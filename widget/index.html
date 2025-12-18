@@ -1,1 +1,202 @@
-<WIDGET_CODE_PLACEHOLDER>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Service Status Widget</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <style>
+		:root {
+			--bg:#fff; --border:#e2e8f0; --text:#1f2933; --muted:#6b7280;
+			--ok:#16a34a; --warn:#facc15; --error:#dc2626; --accent:#2563eb;
+			--radius:12px; --shadow:0 10px 25px rgba(15,23,42,.08);
+			--font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+		}
+
+		body { margin:0; font-family:var(--font); background:transparent; color:var(--text); }
+
+		.widget {
+			max-width:480px; margin:0 auto; background:var(--bg);
+			border-radius:var(--radius); border:1px solid var(--border);
+			box-shadow:var(--shadow); padding:18px 20px 22px;
+			box-sizing:border-box;
+		}
+
+		.header { display:flex; gap:12px; margin-bottom:8px; align-items:center; }
+		.logo {
+			width:40px;height:40px;border-radius:999px;background:#0f172a;
+			display:flex;align-items:center;justify-content:center;
+			color:#fff;font-weight:700;
+		}
+		h1 { font-size:16px;margin:0 }
+		.subtitle { font-size:12px;color:var(--muted);margin-top:2px }
+
+		/* STATUS ROW */
+		.status-row {
+			display:flex;justify-content:space-between;align-items:center;
+			padding:10px 12px;margin:12px 0;
+			background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;
+		}
+		.status-main { display:flex;gap:10px;align-items:center }
+		.dot { width:12px;height:12px;border-radius:999px }
+		.dot.ok{background:var(--ok);box-shadow:0 0 0 6px rgba(22,163,74,.18)}
+		.dot.warn{background:var(--warn);box-shadow:0 0 0 6px rgba(250,204,21,.18)}
+		.dot.error{background:var(--error);box-shadow:0 0 0 6px rgba(220,38,38,.18)}
+		.tag { font-size:11px;padding:3px 8px;border-radius:999px;font-weight:500 }
+
+		/* SYSTEM MESSAGES */
+		h2 { font-size:13px;margin:0 0 4px }
+		.desc { font-size:12px;color:var(--muted);margin-bottom:6px }
+		ul { padding-left:18px;margin:0 }
+		li { font-size:12px;margin-bottom:10px }
+		.chip {
+			display:inline-block;font-size:10px;font-weight:700;
+			padding:2px 8px;border-radius:999px;margin-right:6px;
+			border:1px solid transparent;
+		}
+		.chip.ok{background:#dcfce7;color:#166534;border-color:#bbf7d0}
+		.chip.warning{background:#fef9c3;color:#854d0e;border-color:#fde68a}
+		.chip.error{background:#fee2e2;color:#991b1b;border-color:#fecaca}
+		small{display:block;color:var(--muted);margin-top:2px;white-space:pre-wrap}
+
+		/* CONTACT FORM */
+		.contact { border-top:1px solid #e5e7eb;margin-top:14px;padding-top:12px }
+		label { font-size:11px;color:var(--muted);display:block;margin-bottom:3px }
+		input, textarea {
+			width:100%;font-size:13px;padding:7px 9px;
+			border-radius:8px;border:1px solid #d1d5db;
+			font-family:inherit;box-sizing:border-box;
+		}
+		textarea{min-height:70px;resize:vertical}
+		button {
+			background:var(--accent);color:#fff;border:none;
+			padding:7px 14px;border-radius:999px;
+			font-size:13px;font-weight:500;cursor:pointer;
+		}
+		.form-row { display:flex;justify-content:space-between;align-items:center;margin-top:6px }
+		.form-status { font-size:11px;color:var(--muted) }
+    </style>
+</head>
+
+<body>
+<div class="widget">
+
+    <!-- HEADER -->
+    <div class="header">
+        <div class="logo">era</div>
+        <div>
+            <h1>Service status</h1>
+            <div class="subtitle">Live system information</div>
+        </div>
+    </div>
+
+    <!-- STATUS -->
+    <div class="status-row">
+        <div class="status-main">
+            <div class="dot ok" id="dot"></div>
+            <div>
+                <div id="status-title">All systems operational</div>
+                <div class="subtitle" id="status-sub">No incidents reported</div>
+            </div>
+        </div>
+        <span class="tag" id="status-tag">Operational</span>
+    </div>
+
+    <!-- MESSAGES -->
+    <h2>System messages</h2>
+    <div class="desc" id="desc"></div>
+    <ul id="list"></ul>
+
+    <!-- CONTACT -->
+    <div class="contact">
+        <h2>Contact us</h2>
+        <form id="contact-form">
+            <input type="hidden" name="client_id" value="local-test">
+            <label>Name</label>
+            <input required name="name">
+            <label>Email</label>
+            <input required type="email" name="email">
+            <label>Message</label>
+            <textarea required name="message"></textarea>
+            <div class="form-row">
+                <button type="submit">Send</button>
+                <span class="form-status" id="form-status"></span>
+            </div>
+        </form>
+    </div>
+
+</div>
+
+<script>
+    const API_BASE = "http://localhost:3000";
+
+    const dot = document.getElementById("dot");
+    const title = document.getElementById("status-title");
+    const sub = document.getElementById("status-sub");
+    const tag = document.getElementById("status-tag");
+    const list = document.getElementById("list");
+    const desc = document.getElementById("desc");
+
+    const esc = s => String(s)
+        .replaceAll("&","&amp;").replaceAll("<","&lt;")
+        .replaceAll(">","&gt;").replaceAll('"',"&quot;");
+
+    async function loadStatus() {
+        const res = await fetch(API_BASE + "/api/status");
+        const data = await res.json();
+
+        dot.className = "dot " + (data.overall === "error" ? "error" : data.overall === "warn" ? "warn" : "ok");
+
+        if (data.overall === "error") {
+            title.textContent = "Service disruption";
+            sub.textContent = "Active incident";
+            tag.textContent = "Incident";
+            tag.style.background="#fee2e2"; tag.style.color="#991b1b";
+            desc.textContent = "We’re actively working on incidents.";
+        } else if (data.overall === "warn") {
+            title.textContent = "Degraded performance";
+            sub.textContent = "Some systems affected";
+            tag.textContent = "Degraded";
+            tag.style.background="#fef9c3"; tag.style.color="#854d0e";
+            desc.textContent = "Some services are currently impacted.";
+        } else {
+            desc.textContent = "Everything looks good.";
+        }
+
+        list.innerHTML = "";
+        (data.messages || []).forEach(m => {
+            const li = document.createElement("li");
+            const lvl = m.status || "ok";
+            li.innerHTML =
+                `<span class="chip ${lvl}">${lvl.toUpperCase()}</span>` +
+                `<strong>${esc(m.name)}</strong>` +
+                `<small>${esc(m.message)}</small>`;
+            list.appendChild(li);
+        });
+    }
+
+    loadStatus();
+
+    // CONTACT FORM
+    const form = document.getElementById("contact-form");
+    const status = document.getElementById("form-status");
+
+    form.addEventListener("submit", async e => {
+        e.preventDefault();
+        status.textContent = "Sending…";
+
+        const res = await fetch(API_BASE + "/api/widget-contact", {
+            method:"POST",
+            body:new FormData(form)
+        });
+
+        if (res.ok) {
+            status.textContent = "Message sent";
+            form.reset();
+        } else {
+            status.textContent = "Something went wrong";
+        }
+    });
+</script>
+</body>
+</html>
