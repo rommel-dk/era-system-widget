@@ -1,18 +1,24 @@
 {
-  "overall": "warn",
-  "updatedAt": "2025-12-18T17:11:21.584Z",
+  "overall": "ok",
+  "updatedAt": "2025-12-18T18:13:30.960Z",
   "messages": [
     {
-      "name": "AWS mail delivery degraded",
-      "status": "warning",
-      "solved": "yes",
-      "message": "Emails may be delayed due to upstream issues."
+      "name": "SMTP delivery delays (AWS SES)",
+      "status": "ok",
+      "display": "yes",
+      "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\nWhat this means for you:\n\\- Transactional emails may arrive later than usual\n\\- No data has been lost\n\\- No action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
+      "doc": "System messages",
+      "page": "System messages",
+      "updated": "2025-12-18T18:10:49.632Z"
     },
     {
-      "name": "Client portal outage",
-      "status": "error",
-      "solved": "no",
-      "message": "The client portal is currently unavailable."
+      "name": "Cloudflare delivery delays (AWS SES)",
+      "status": "ok",
+      "display": "yes",
+      "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\nWhat this means for you:\n\\- Transactional emails may arrive later than usual\n\\- No data has been lost\n\\- No action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
+      "doc": "System messages",
+      "page": "System messages",
+      "updated": "2025-12-18T18:10:49.632Z"
     }
   ]
 }

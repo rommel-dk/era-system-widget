@@ -1,4 +1,3 @@
-// server/services/clickup-system.js
 import axios from "axios";
 import fs from "fs";
 import path from "path";
@@ -6,42 +5,50 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
 /**
- * Harvest [system] blocks from ClickUp Docs (v3) and write to ../data/system.json
+ * Harvest [system] blocks from ClickUp Docs (v3) and write to ../../data/system.json
  *
  * Block format:
  * [system]
- * name: aws mail server is down
+ * name: SMTP delivery delays (AWS SES)
  * status: warning
- * solved: no
- * message: dear era clients...
+ * display: yes
+ * message:
+ * We are currently experiencing delayed email delivery...
  * [/system]
+ *
+ * Visibility rules:
+ * - display: no   => hidden (not written to data/system.json)
+ * - display: yes  => shown
+ * - display missing => default yes (shown)
+ *
+ * Status rules:
+ * - ok|warning|error
+ * Overall status is derived ONLY from visible messages.
  *
  * ENV (required):
  *   CLICKUP_TOKEN
  *   CLICKUP_WORKSPACE_ID (or CLICKUP_TEAM_ID)
  *
  * ENV (optional):
- *   CU_DOC_NAME_FILTER="System|Status|Incidents"  // regex to limit docs by name
+ *   CU_DOC_NAME_FILTER="System|Status|Incidents"
  *   CU_DEBUG=0
  *   CU_TRACE_PAGES=0
  *   CU_TRACE_SYSTEM=0
- *   CU_MAX_DOC_DEPTH=0         // recurse into child docs (0 = off)
- *   CU_DUMP_PAGES=0            // dump raw page content under data/dumps/
- *
- *   CU_SINCE_HOURS=60          // ONLY fetch page bodies updated in last N hours
- *   CU_FULL_RESYNC=0           // set to 1 to ignore SINCE window and scan all pages
- *   CU_CONCURRENCY=6           // parallel body fetches
- *
- *   DATA_DIR (optional path for output; defaults to ../../data from this file)
+ *   CU_MAX_DOC_DEPTH=0
+ *   CU_DUMP_PAGES=0
+ *   CU_SINCE_HOURS=60
+ *   CU_FULL_RESYNC=0
+ *   CU_CONCURRENCY=6
+ *   DATA_DIR=... (defaults to repoRoot/data)
  */
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ALWAYS load env from server/.env
+// Always load env from server/.env (so scripts work when run from repo root)
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
-// NOTE: this file lives in server/services/ → data folder is at repoRoot/data/
+// Paths (this file is server/services/, data folder is repoRoot/data/)
 const dataDir = process.env.DATA_DIR || path.join(__dirname, "..", "..", "data");
 const dumpDir = path.join(dataDir, "dumps");
 const outPath = path.join(dataDir, "system.json");
@@ -65,6 +72,7 @@ const cutoffMs =
     (!FULL_RESYNC && SINCE_HOURS > 0)
         ? Date.now() - SINCE_HOURS * 60 * 60 * 1000
         : 0;
+
 const CONCURRENCY = Math.max(1, parseInt(process.env.CU_CONCURRENCY || "6", 10));
 
 if (!API_TOKEN || !WORKSPACE_ID) {
@@ -112,31 +120,28 @@ function normalizeStatus(s = "") {
     return "ok";
 }
 
-function normalizeSolved(s = "") {
+function normalizeDisplay(s = "") {
     const v = String(s).trim().toLowerCase().replace(/[,;]+$/, "");
-    if (["yes", "true", "1"].includes(v)) return "yes";
     if (["no", "false", "0"].includes(v)) return "no";
-    return "no";
+    return "yes"; // default visible
 }
 
 /**
- * Keep the content mostly raw, but unescape \[ \] so \[system] works.
- * Also decode a few common entities (Docs sometimes returns HTML).
+ * Keep content mostly raw, but:
+ * - unescape \[ \] so \[system] works
+ * - decode a few common entities
  */
 function prepareSystemSource(v = "") {
     let s = String(v);
-
     const map = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'" };
     s = s.replace(/&(amp|lt|gt|quot|#39);/g, (m) => map[m] || m);
-
     s = s.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
     return s;
 }
 
 /**
  * Extract all [system]...[/system] blocks.
- * - supports multi-line message
- * - solved must be "no" to be included
+ * IMPORTANT: supports multiline "message:" where the first line may be empty.
  */
 function extractAllSystemEntries(body = "") {
     const results = [];
@@ -154,27 +159,35 @@ function extractAllSystemEntries(body = "") {
         for (const rawLine of inner.split(/\r?\n/)) {
             const line = rawLine.trim();
 
-            // blank line in message keeps newlines
+            // Blank lines inside message should be preserved
             if (!line) {
                 if (currentKey === "message") obj.message = (obj.message || "") + "\n";
                 continue;
             }
 
-            // allow [key: value] bracketed lines too
+            // allow bracketed lines: [key: value]
             let l = line;
             if (/^\[.*\]$/.test(l)) l = l.slice(1, -1).trim();
 
             // key: value OR key=value
-            const kv = l.match(/^([A-Za-z0-9_.-]+)\s*[:=]\s*(.+)$/);
+            // NOTE: (.*) allows empty value, enabling "message:" start of multiline message.
+            const kv = l.match(/^([A-Za-z0-9_.-]+)\s*[:=]\s*(.*)$/);
             if (kv) {
                 const key = kv[1].toLowerCase();
-                const val = (kv[2] || "").trim();
-                obj[key] = val;
-                currentKey = key;
+                const valRaw = (kv[2] ?? "").toString();
+
+                if (key === "message") {
+                    const first = valRaw.trim();
+                    obj.message = (obj.message || "") + first;
+                    currentKey = "message";
+                } else {
+                    obj[key] = valRaw.trim();
+                    currentKey = key;
+                }
                 continue;
             }
 
-            // continuation
+            // Continuation lines: only append if currently inside message
             if (currentKey === "message") {
                 obj.message = (obj.message || "");
                 if (obj.message && !obj.message.endsWith("\n")) obj.message += "\n";
@@ -182,18 +195,18 @@ function extractAllSystemEntries(body = "") {
             }
         }
 
-        const solved = normalizeSolved(obj.solved);
-        if (solved !== "no") continue;
+        const display = normalizeDisplay(obj.display);
+        if (display !== "yes") continue;
 
         results.push({
             name: obj.name || "System message",
             status: normalizeStatus(obj.status),
-            solved: "no",
-            message: obj.message || "",
+            display: "yes",
+            message: (obj.message || "").trim(),
         });
     }
 
-    // de-dup by (name+status+message) so repeated blocks don’t spam
+    // de-dup by (name+status+message)
     const seen = new Set();
     const dedup = [];
     for (const r of results) {
@@ -216,7 +229,11 @@ async function listAllDocs() {
             })
         );
         const batch = data?.docs || [];
-        docs.push(...(DOC_NAME_FILTER ? batch.filter((d) => d?.name && DOC_NAME_FILTER.test(d.name)) : batch));
+        docs.push(
+            ...(DOC_NAME_FILTER
+                ? batch.filter((d) => d?.name && DOC_NAME_FILTER.test(d.name))
+                : batch)
+        );
         next_cursor = data?.next_cursor;
     } while (next_cursor);
     return docs;
@@ -238,7 +255,6 @@ async function listChildDocs(parentDocId) {
     }
 }
 
-/** Metadata-only listing with date_updated (no content) */
 async function pageListingMeta(docId) {
     try {
         const { data } = await withBackoff(() =>
@@ -255,7 +271,6 @@ async function pageListingMeta(docId) {
     }
 }
 
-// fetch page content (try multiple formats until we get text)
 async function fetchPageBody(docId, pageId) {
     const fmts = ["text/md", "text/plain", "application/json", "text/html"];
     for (const fmt of fmts) {
@@ -286,13 +301,12 @@ async function fetchPageBody(docId, pageId) {
             const t = String(c).trim();
             if (t) return t;
         } catch {
-            // ignore; try next
+            // ignore; try next format
         }
     }
     return "";
 }
 
-// simple concurrency helper
 async function mapLimit(items, limit, worker) {
     const results = new Array(items.length);
     let i = 0;
@@ -312,27 +326,24 @@ async function mapLimit(items, limit, worker) {
     return results;
 }
 
-async function collectSystemFromDoc(docId, depth = 0) {
+async function collectSystemFromDoc(doc, depth = 0) {
     if (depth > MAX_DEPTH) return [];
 
-    // 1) metadata first
-    const pages = await pageListingMeta(docId);
+    const pages = await pageListingMeta(doc.id);
 
-    // 2) apply cutoff filter
     const recentPages = cutoffMs
         ? pages.filter((p) => (Number(p?.date_updated) || 0) >= cutoffMs)
         : pages;
 
     if (CU_DEBUG) {
         console.log(
-            `doc ${docId}: pages=${pages.length}, recent=${recentPages.length}` +
+            `doc "${doc.name}" (${doc.id}): pages=${pages.length}, recent=${recentPages.length}` +
             (cutoffMs ? ` since ${new Date(cutoffMs).toISOString()}` : "")
         );
     }
     if (!recentPages.length) return [];
 
-    // 3) fetch bodies for recent pages (concurrently)
-    const bodies = await mapLimit(recentPages, CONCURRENCY, (p) => fetchPageBody(docId, p.id));
+    const bodies = await mapLimit(recentPages, CONCURRENCY, (p) => fetchPageBody(doc.id, p.id));
 
     const entries = [];
     for (let i = 0; i < recentPages.length; i++) {
@@ -343,10 +354,10 @@ async function collectSystemFromDoc(docId, depth = 0) {
         if (DO_DUMP) {
             try {
                 fs.mkdirSync(dumpDir, { recursive: true });
-                const fname = `${sanitizeFile(docId)}-${sanitizeFile(p.id)}.txt`;
+                const fname = `${sanitizeFile(doc.id)}-${sanitizeFile(p.id)}.txt`;
                 fs.writeFileSync(path.join(dumpDir, fname), body || "");
             } catch {
-                // ignore dump issues
+                // ignore
             }
         }
 
@@ -356,37 +367,28 @@ async function collectSystemFromDoc(docId, depth = 0) {
         }
 
         const found = extractAllSystemEntries(body);
-
         for (const e of found) {
             if (TRACE_SYS) {
                 console.log(`      • SYSTEM "${p.name}" -> ${e.status}: "${e.name}" msg[${e.message.length}]`);
             }
             entries.push({
                 ...e,
-                doc_id: docId,
-                page_id: p.id,
-                page_name: p.name,
+                doc: doc.name,
+                page: p.name,
                 updated: p.date_updated ? new Date(Number(p.date_updated)).toISOString() : null,
             });
         }
     }
 
-    // 4) recurse into child docs if enabled
     if (MAX_DEPTH > depth) {
-        const children = await listChildDocs(docId);
+        const children = await listChildDocs(doc.id);
         for (const child of children) {
-            const more = await collectSystemFromDoc(child.id, depth + 1);
+            const more = await collectSystemFromDoc(child, depth + 1);
             entries.push(...more);
         }
     }
 
     return entries;
-}
-
-function computeOverall(messages) {
-    if (messages.some((m) => m.status === "error")) return "warn" === "error" ? "error" : "error";
-    if (messages.some((m) => m.status === "warning")) return "warn";
-    return "ok";
 }
 
 // ---------- main ----------
@@ -406,13 +408,12 @@ export async function updateSystemJsonFromClickUp() {
 
     for (const doc of docs) {
         try {
-            const entries = await collectSystemFromDoc(doc.id, 0);
+            const entries = await collectSystemFromDoc(doc, 0);
             if (!entries.length) {
                 skippedDocs++;
                 continue;
             }
-            // enrich with doc name (nice for debugging)
-            all.push(...entries.map((e) => ({ ...e, doc_name: doc.name })));
+            all.push(...entries);
         } catch (err) {
             skippedDocs++;
             if (CU_DEBUG) {
@@ -421,32 +422,34 @@ export async function updateSystemJsonFromClickUp() {
         }
     }
 
-    // Sort: severity (error > warning > ok), then newest updated
+    // Only visible entries should exist here already, but keep it bulletproof:
+    const visible = all.filter((m) => m.display === "yes");
+
+    // Sort: error > warning > ok; then newest updated
     const sev = { error: 0, warning: 1, ok: 2 };
-    all.sort((a, b) => {
+    visible.sort((a, b) => {
         const sa = sev[a.status] ?? 9;
         const sb = sev[b.status] ?? 9;
         if (sa !== sb) return sa - sb;
         return (Date.parse(b.updated || "") || 0) - (Date.parse(a.updated || "") || 0);
     });
 
-    // Overall for widget (server expects ok|warn|error; map warning→warn)
-    const hasError = all.some((m) => m.status === "error");
-    const hasWarn = all.some((m) => m.status === "warning");
+    // Widget expects ok|warn|error
+    const hasError = visible.some((m) => m.status === "error");
+    const hasWarn = visible.some((m) => m.status === "warning");
     const overall = hasError ? "error" : hasWarn ? "warn" : "ok";
 
     const payload = {
         overall,
         updatedAt: new Date().toISOString(),
-        // keep the fields your widget/API already serves
-        messages: all.map(({ name, status, solved, message, doc_name, page_name, updated }) => ({
-            name,
-            status,
-            solved,
-            message,
-            doc: doc_name || undefined,
-            page: page_name || undefined,
-            updated: updated || undefined,
+        messages: visible.map((m) => ({
+            name: m.name,
+            status: m.status,
+            display: m.display,
+            message: m.message,
+            doc: m.doc,
+            page: m.page,
+            updated: m.updated,
         })),
     };
 
@@ -454,7 +457,7 @@ export async function updateSystemJsonFromClickUp() {
     fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), "utf8");
 
     console.log(
-        `\n🧾 Wrote ${payload.messages.length} active system message(s) (docs with no matches: ${skippedDocs}) → ${outPath}`
+        `\n🧾 Wrote ${payload.messages.length} visible system message(s) (docs with no matches: ${skippedDocs}) → ${outPath}`
     );
 
     return payload;
