@@ -1,24 +1,15 @@
 {
-  "overall": "ok",
-  "updatedAt": "2025-12-18T18:13:30.960Z",
+  "overall": "warn",
+  "updatedAt": "2025-12-18T18:29:33.745Z",
   "messages": [
     {
       "name": "SMTP delivery delays (AWS SES)",
-      "status": "ok",
+      "status": "warning",
       "display": "yes",
       "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\nWhat this means for you:\n\\- Transactional emails may arrive later than usual\n\\- No data has been lost\n\\- No action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
       "doc": "System messages",
       "page": "System messages",
-      "updated": "2025-12-18T18:10:49.632Z"
-    },
-    {
-      "name": "Cloudflare delivery delays (AWS SES)",
-      "status": "ok",
-      "display": "yes",
-      "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\nWhat this means for you:\n\\- Transactional emails may arrive later than usual\n\\- No data has been lost\n\\- No action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
-      "doc": "System messages",
-      "page": "System messages",
-      "updated": "2025-12-18T18:10:49.632Z"
+      "updated": "2025-12-18T18:27:01.196Z"
     }
   ]
 }

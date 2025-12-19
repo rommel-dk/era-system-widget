@@ -107,11 +107,11 @@
     <div class="desc" id="desc"></div>
     <ul id="list"></ul>
 
-    <!-- CONTACT -->
+    <!-- CONTACT (static-host safe) -->
     <div class="contact">
         <h2>Contact us</h2>
         <form id="contact-form">
-            <input type="hidden" name="client_id" value="local-test">
+            <input type="hidden" name="client_id" id="client-id" value="">
             <label>Name</label>
             <input required name="name">
             <label>Email</label>
@@ -128,7 +128,22 @@
 </div>
 
 <script>
-    const API_BASE = "http://localhost:3000";
+    // Pull client_id from querystring for logging if you want it later
+    (function () {
+        const params = new URLSearchParams(window.location.search);
+        const clientId = params.get("client_id") || "";
+        document.getElementById("client-id").value = clientId;
+    })();
+
+    // If embedded in an iframe, auto-resize
+    function sendHeight() {
+        const height = document.documentElement.scrollHeight;
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: "ERA_WIDGET_RESIZE", height }, "*");
+        }
+    }
+    window.addEventListener("load", () => setTimeout(sendHeight, 50));
+    window.addEventListener("resize", sendHeight);
 
     const dot = document.getElementById("dot");
     const title = document.getElementById("status-title");
@@ -137,64 +152,92 @@
     const list = document.getElementById("list");
     const desc = document.getElementById("desc");
 
-    const esc = s => String(s)
+    // Because this file is /widget/index.html, the JSON is /data/system.json
+    const STATUS_URL = "../data/system.json";
+
+    const esc = s => String(s ?? "")
         .replaceAll("&","&amp;").replaceAll("<","&lt;")
         .replaceAll(">","&gt;").replaceAll('"',"&quot;");
 
     async function loadStatus() {
-        const res = await fetch(API_BASE + "/api/status");
-        const data = await res.json();
+        try {
+            const res = await fetch(STATUS_URL, { cache: "no-store" });
+            if (!res.ok) throw new Error("Failed to load status JSON");
+            const data = await res.json();
 
-        dot.className = "dot " + (data.overall === "error" ? "error" : data.overall === "warn" ? "warn" : "ok");
+            dot.className = "dot " + (data.overall === "error" ? "error" : data.overall === "warn" ? "warn" : "ok");
 
-        if (data.overall === "error") {
-            title.textContent = "Service disruption";
-            sub.textContent = "Active incident";
-            tag.textContent = "Incident";
-            tag.style.background="#fee2e2"; tag.style.color="#991b1b";
-            desc.textContent = "We’re actively working on incidents.";
-        } else if (data.overall === "warn") {
-            title.textContent = "Degraded performance";
-            sub.textContent = "Some systems affected";
-            tag.textContent = "Degraded";
-            tag.style.background="#fef9c3"; tag.style.color="#854d0e";
-            desc.textContent = "Some services are currently impacted.";
-        } else {
-            desc.textContent = "Everything looks good.";
+            // Reset tag styles (important when switching states)
+            tag.style.background = "";
+            tag.style.color = "";
+
+            if (data.overall === "error") {
+                title.textContent = "Service disruption";
+                sub.textContent = "Active incident";
+                tag.textContent = "Incident";
+                tag.style.background="#fee2e2"; tag.style.color="#991b1b";
+                desc.textContent = "We’re actively working on incidents.";
+            } else if (data.overall === "warn") {
+                title.textContent = "Degraded performance";
+                sub.textContent = "Some systems affected";
+                tag.textContent = "Degraded";
+                tag.style.background="#fef9c3"; tag.style.color="#854d0e";
+                desc.textContent = "Some services are currently impacted.";
+            } else {
+                title.textContent = "All systems operational";
+                sub.textContent = "No incidents reported";
+                tag.textContent = "Operational";
+                tag.style.background="#dcfce7"; tag.style.color="#166534";
+                desc.textContent = "Everything looks good.";
+            }
+
+            list.innerHTML = "";
+            (data.messages || []).forEach(m => {
+                const li = document.createElement("li");
+                const lvl = m.status || "ok";
+                li.innerHTML =
+                    `<span class="chip ${lvl}">${esc(lvl).toUpperCase()}</span>` +
+                    `<strong>${esc(m.name)}</strong>` +
+                    `<small>${esc(m.message)}</small>`;
+                list.appendChild(li);
+            });
+
+            sendHeight();
+        } catch (err) {
+            desc.textContent = "Status unavailable right now.";
+            sendHeight();
         }
-
-        list.innerHTML = "";
-        (data.messages || []).forEach(m => {
-            const li = document.createElement("li");
-            const lvl = m.status || "ok";
-            li.innerHTML =
-                `<span class="chip ${lvl}">${lvl.toUpperCase()}</span>` +
-                `<strong>${esc(m.name)}</strong>` +
-                `<small>${esc(m.message)}</small>`;
-            list.appendChild(li);
-        });
     }
 
     loadStatus();
 
-    // CONTACT FORM
+    // CONTACT FORM:
+    // GitHub Pages cannot send email by itself.
+    // You must provide a backend endpoint (Cloudflare Worker / WP endpoint / Vercel / etc.)
+    // If you later add CONTACT_ENDPOINT, it will work without changing the UI.
+    const CONTACT_ENDPOINT = ""; // e.g. "https://yourdomain.com/api/widget-contact"
+
     const form = document.getElementById("contact-form");
-    const status = document.getElementById("form-status");
+    const formStatus = document.getElementById("form-status");
 
-    form.addEventListener("submit", async e => {
+    form.addEventListener("submit", async (e) => {
         e.preventDefault();
-        status.textContent = "Sending…";
+        formStatus.textContent = "Sending…";
 
-        const res = await fetch(API_BASE + "/api/widget-contact", {
-            method:"POST",
-            body:new FormData(form)
-        });
+        if (!CONTACT_ENDPOINT) {
+            formStatus.textContent = "Contact form not enabled on this hosted version.";
+            return;
+        }
 
-        if (res.ok) {
-            status.textContent = "Message sent";
+        try {
+            const res = await fetch(CONTACT_ENDPOINT, { method: "POST", body: new FormData(form) });
+            if (!res.ok) throw new Error("Request failed");
+            formStatus.textContent = "Message sent";
             form.reset();
-        } else {
-            status.textContent = "Something went wrong";
+        } catch {
+            formStatus.textContent = "Something went wrong";
+        } finally {
+            sendHeight();
         }
     });
 </script>
