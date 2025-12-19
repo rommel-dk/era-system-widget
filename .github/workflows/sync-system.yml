@@ -1,4 +1,4 @@
-name: Sync system status (ClickUp → data/system.json)
+name: Sync system status
 
 on:
   schedule:
@@ -9,15 +9,19 @@ permissions:
   contents: write
 
 concurrency:
-  group: system-status-sync
+  group: sync-system
   cancel-in-progress: false
 
 jobs:
   sync:
+    # Toggle like your other system:
+    # Repo → Settings → Secrets and variables → Actions → Variables
+    # Set ERA_SYSTEM_WIDGET_STATUS=on/off
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ERA_SYSTEM_WIDGET_STATUS == 'on' }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -28,22 +32,55 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci --omit=dev
 
-      # Run your harvester (adjust path if needed)
-      - name: Harvest ClickUp system messages
+      - name: Run ClickUp system sync
         run: node server/services/clickup-system.js
         env:
           CLICKUP_TOKEN: ${{ secrets.CLICKUP_TOKEN }}
           CLICKUP_WORKSPACE_ID: ${{ secrets.CLICKUP_WORKSPACE_ID }}
-          # Optional knobs (you can delete these if you want defaults)
+
+          # Optional knobs (keep or delete)
           CU_DOC_NAME_FILTER: "System|Status|Incidents"
+          CU_MAX_DOC_DEPTH: "0"
+          CU_DEBUG: "0"
+          CU_TRACE_PAGES: "0"
+          CU_TRACE_SYSTEM: "0"
+          CU_DUMP_PAGES: "0"
           CU_FULL_RESYNC: "0"
           CU_SINCE_HOURS: "72"
           CU_CONCURRENCY: "6"
 
-      - name: Commit & push if changed
+      - name: Commit and push if system.json changed
         run: |
-          git config user.name "era-bot"
-          git config user.email "bot@era.dk"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Only proceed if data/system.json actually changed
+          if git diff --quiet -- data/system.json; then
+            echo "No changes in data/system.json"
+            exit 0
+          fi
+
+          # Stage tracked changes (safe)
+          git add -u
+
+          # Safety
+          if git diff --cached --quiet; then
+            echo "No staged changes, skipping commit"
+            exit 0
+          fi
+
+          git commit -m "chore: sync system.json"
+
+          # Rebase on latest remote (avoids push errors)
+          git pull --rebase origin "${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+
+          git push
+
+  skipped:
+    if: ${{ github.event_name != 'workflow_dispatch' && vars.ERA_SYSTEM_WIDGET_STATUS != 'on' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "System widget sync is OFF (ERA_SYSTEM_WIDGET_STATUS != 'on') — skipping scheduled run."
