@@ -1,19 +1,73 @@
 // server/services/clickup-system.js
-import fetch from "node-fetch";
+import axios from "axios";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+
+/**
+ * Harvest [system] blocks from ClickUp Docs (v3) and write to ../../data/system.json
+ *
+ * Block format (recommended):
+ * [system]
+ * name: SMTP delivery delays (AWS SES)
+ * status: warning
+ * display: yes
+ * domain: conscia.com, example.org, @   # optional. @ or missing => global
+ * message:
+ * We are currently experiencing delayed email delivery...
+ * [/system]
+ *
+ * Visibility rules (backwards compatible):
+ * - If "display" exists: display=yes -> include, display=no -> exclude
+ * - If "display" missing: default include (yes)
+ * - If legacy "solved" exists and display missing: solved=no -> include, solved=yes -> exclude
+ *
+ * Status rules:
+ * - ok|warning|error
+ * Overall status is derived ONLY from visible messages.
+ *
+ * ENV (required):
+ *   CLICKUP_TOKEN
+ *   CLICKUP_WORKSPACE_ID (or CLICKUP_TEAM_ID)
+ *
+ * ENV (optional):
+ *   CU_DOC_NAME_FILTER="System|Status|Incidents"
+ *   CU_DEBUG=0
+ *   CU_TRACE_PAGES=0
+ *   CU_TRACE_SYSTEM=0
+ *   CU_MAX_DOC_DEPTH=0
+ *   CU_DUMP_PAGES=0
+ *   CU_SINCE_HOURS=60
+ *   CU_FULL_RESYNC=0
+ *   CU_CONCURRENCY=6
+ *   DATA_DIR=... (defaults to repoRoot/data)
+ */
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Always load env from server/.env (so scripts work when run from repo root)
+dotenv.config({ path: path.join(__dirname, "..", ".env") });
+
+// Paths (this file is server/services/, data folder is repoRoot/data/)
+const dataDir = process.env.DATA_DIR || path.join(__dirname, "..", "..", "data");
+const dumpDir = path.join(dataDir, "dumps");
+const outPath = path.join(dataDir, "system.json");
 
 const API_TOKEN = process.env.CLICKUP_TOKEN;
 const WORKSPACE_ID = process.env.CLICKUP_WORKSPACE_ID || process.env.CLICKUP_TEAM_ID;
 
 const CU_DEBUG = /^(1|true|yes)$/i.test(process.env.CU_DEBUG || "");
 const TRACE_PAGES = /^(1|true|yes)$/i.test(process.env.CU_TRACE_PAGES || "");
-
+const TRACE_SYS = /^(1|true|yes)$/i.test(process.env.CU_TRACE_SYSTEM || "");
+const MAX_DEPTH = parseInt(process.env.CU_MAX_DOC_DEPTH || "0", 10);
+const DO_DUMP = /^(1|true|yes)$/i.test(process.env.CU_DUMP_PAGES || "");
 const DOC_NAME_FILTER = process.env.CU_DOC_NAME_FILTER
     ? new RegExp(process.env.CU_DOC_NAME_FILTER, "i")
     : null;
 
+// Delta knobs
 const SINCE_HOURS = parseInt(process.env.CU_SINCE_HOURS || "0", 10);
 const FULL_RESYNC = /^(1|true|yes)$/i.test(process.env.CU_FULL_RESYNC || "");
 const cutoffMs =
@@ -24,18 +78,27 @@ const cutoffMs =
 const CONCURRENCY = Math.max(1, parseInt(process.env.CU_CONCURRENCY || "6", 10));
 
 if (!API_TOKEN || !WORKSPACE_ID) {
-    throw new Error("Missing CLICKUP_TOKEN or CLICKUP_WORKSPACE_ID/CLICKUP_TEAM_ID");
+    console.error("Missing CLICKUP_TOKEN or CLICKUP_WORKSPACE_ID/CLICKUP_TEAM_ID.");
+    process.exit(1);
 }
+
+// ---------- HTTP ----------
+const v3 = axios.create({
+    baseURL: "https://api.clickup.com/api/v3",
+    headers: { Authorization: API_TOKEN },
+    timeout: 20000,
+});
 
 async function withBackoff(fn, tries = 5, baseDelay = 600) {
     let delay = baseDelay;
     for (let i = 0; i < tries; i++) {
-        try { return await fn(); }
-        catch (err) {
-            const s = err?.status;
+        try {
+            return await fn();
+        } catch (err) {
+            const s = err?.response?.status;
             const retriable = s === 429 || (s >= 500 && s < 600);
             if (retriable && i < tries - 1) {
-                await new Promise(r => setTimeout(r, delay));
+                await new Promise((r) => setTimeout(r, delay));
                 delay = Math.min(delay * 2, 8000);
                 continue;
             }
@@ -45,65 +108,221 @@ async function withBackoff(fn, tries = 5, baseDelay = 600) {
     throw new Error("unreachable");
 }
 
-async function v3Get(pathname, params = {}) {
-    const url = new URL(`https://api.clickup.com/api/v3${pathname}`);
-    Object.entries(params).forEach(([k, v]) => {
-        if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
-    });
-
-    const res = await fetch(url.toString(), {
-        headers: { Authorization: API_TOKEN },
-    });
-
-    if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        const e = new Error(`ClickUp v3 error ${res.status}: ${txt || "unknown"}`);
-        e.status = res.status;
-        throw e;
-    }
-    return res.json();
+// ---------- helpers ----------
+function sanitizeFile(s = "") {
+    return String(s).replace(/[^\w.-]+/g, "_").slice(0, 120);
 }
 
-async function mapLimit(items, limit, worker) {
-    const results = new Array(items.length);
-    let i = 0;
-    async function run() {
-        while (true) {
-            const idx = i++;
-            if (idx >= items.length) break;
-            try { results[idx] = await worker(items[idx], idx); }
-            catch { results[idx] = undefined; }
+function normalizeStatus(s = "") {
+    const v = String(s).trim().toLowerCase().replace(/[,;]+$/, "");
+    if (v === "warn") return "warning";
+    if (v === "incident") return "error";
+    if (v === "degraded") return "warning";
+    if (["ok", "warning", "error"].includes(v)) return v;
+    return "ok";
+}
+
+function normalizeDisplay(s = "") {
+    const v = String(s).trim().toLowerCase().replace(/[,;]+$/, "");
+    if (["no", "false", "0", "off"].includes(v)) return "no";
+    if (["yes", "true", "1", "on"].includes(v)) return "yes";
+    return ""; // means: not provided / unknown
+}
+
+// legacy compatibility
+function normalizeSolved(s = "") {
+    const v = String(s).trim().toLowerCase().replace(/[,;]+$/, "");
+    if (["yes", "true", "1"].includes(v)) return "yes";
+    if (["no", "false", "0"].includes(v)) return "no";
+    return "";
+}
+
+function parseDomains(v) {
+    // [] = global (everyone)
+    if (v == null) return [];
+    const raw = String(v).trim();
+    if (!raw) return [];
+    if (raw === "@") return [];
+
+    const parts = raw
+        .split(",")
+        .map((x) => x.trim().toLowerCase())
+        .filter(Boolean)
+        .map((x) => (x.startsWith("www.") ? x.slice(4) : x));
+
+    if (parts.includes("@")) return [];
+    return Array.from(new Set(parts));
+}
+
+/**
+ * Keep content mostly raw, but:
+ * - unescape \[ \] so \[system] works
+ * - decode a few common entities
+ * - strip zero-width chars (can break matching)
+ */
+function prepareSystemSource(v = "") {
+    let s = String(v);
+
+    const map = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'" };
+    s = s.replace(/&(amp|lt|gt|quot|#39);/g, (m) => map[m] || m);
+
+    // ClickUp sometimes returns \[system] instead of [system]
+    s = s.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
+
+    // remove zero-width chars
+    s = s.replace(/[\u200B-\u200D\uFEFF]/g, "");
+
+    return s;
+}
+
+/**
+ * Extract all [system]...[/system] blocks.
+ * IMPORTANT: supports multiline "message:" where the first line may be empty.
+ */
+function extractAllSystemEntries(body = "") {
+    const results = [];
+    const plain = prepareSystemSource(body);
+    const re = /\[system\]([\s\S]*?)\[\/system\]/gi;
+    let m;
+
+    while ((m = re.exec(plain)) !== null) {
+        const innerRaw = m[1] || "";
+        const inner = innerRaw.trim();
+        if (!inner) continue;
+
+        const obj = {};
+        let currentKey = null;
+
+        for (const rawLine of innerRaw.split(/\r?\n/)) {
+            const lineTrimmed = rawLine.trim();
+
+            // Blank lines inside message should be preserved
+            if (!lineTrimmed) {
+                if (currentKey === "message") obj.message = (obj.message || "") + "\n";
+                continue;
+            }
+
+            // allow bracketed lines: [key: value]
+            let l = lineTrimmed;
+            if (/^\[.*\]$/.test(l)) l = l.slice(1, -1).trim();
+
+            // key: value OR key=value
+            // NOTE: (.*) allows empty value, enabling "message:" on its own line
+            const kv = l.match(/^([A-Za-z0-9_.-]+)\s*[:=]\s*(.*)$/);
+            if (kv) {
+                const key = kv[1].toLowerCase();
+                const valRaw = (kv[2] ?? "").toString();
+
+                if (key === "message") {
+                    // message can start empty, then continuation lines fill it
+                    const first = valRaw.trim();
+                    obj.message = (obj.message || "") + first;
+                    currentKey = "message";
+                } else {
+                    obj[key] = valRaw.trim();
+                    currentKey = key;
+                }
+                continue;
+            }
+
+            // Continuation lines: only append if currently inside message
+            if (currentKey === "message") {
+                obj.message = (obj.message || "");
+                if (obj.message && !obj.message.endsWith("\n")) obj.message += "\n";
+                obj.message += rawLine; // preserve original spacing
+            }
         }
+
+        const name = (obj.name || "").trim();
+        if (!name) continue;
+
+        // Visibility logic:
+        // - If display is explicitly set -> use it
+        // - Else if solved is set (legacy) -> solved=no shows
+        // - Else -> default show
+        const displayNorm = normalizeDisplay(obj.display);
+        if (displayNorm) {
+            if (displayNorm !== "yes") continue;
+        } else {
+            const solvedNorm = normalizeSolved(obj.solved);
+            if (solvedNorm) {
+                if (solvedNorm !== "no") continue;
+            }
+            // else: default visible
+        }
+
+        const domains = parseDomains(obj.domain);
+
+        results.push({
+            name,
+            status: normalizeStatus(obj.status),
+            display: "yes",
+            domains, // [] = global
+            message: (obj.message || "").trim(),
+        });
     }
-    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
-    return results;
+
+    // de-dup by (name+status+message+domains)
+    const seen = new Set();
+    const dedup = [];
+    for (const r of results) {
+        const k = `${r.name}||${r.status}||${r.message}||${(r.domains || []).join(",")}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        dedup.push(r);
+    }
+    return dedup;
 }
 
+// ---------- API helpers ----------
 async function listAllDocs() {
     const docs = [];
     let next_cursor;
-
     do {
-        const data = await withBackoff(() =>
-            v3Get(`/workspaces/${WORKSPACE_ID}/docs`, { limit: 100, ...(next_cursor ? { next_cursor } : {}) })
+        const { data } = await withBackoff(() =>
+            v3.get(`/workspaces/${WORKSPACE_ID}/docs`, {
+                params: { limit: 100, ...(next_cursor ? { next_cursor } : {}) },
+            })
         );
-
         const batch = data?.docs || [];
-        docs.push(...(DOC_NAME_FILTER ? batch.filter(d => d?.name && DOC_NAME_FILTER.test(d.name)) : batch));
+        docs.push(
+            ...(DOC_NAME_FILTER
+                ? batch.filter((d) => d?.name && DOC_NAME_FILTER.test(d.name))
+                : batch)
+        );
         next_cursor = data?.next_cursor;
     } while (next_cursor);
-
     return docs;
 }
 
-async function listPagesMeta(docId) {
+async function listChildDocs(parentDocId) {
     try {
-        const data = await withBackoff(() =>
-            v3Get(`/workspaces/${WORKSPACE_ID}/docs/${docId}/pages`, { max_page_depth: -1 })
+        const { data } = await withBackoff(() =>
+            v3.get(`/workspaces/${WORKSPACE_ID}/docs`, {
+                params: { parent_type: "DOC", parent_id: parentDocId, limit: 100 },
+            })
+        );
+        return data?.docs || [];
+    } catch (err) {
+        if (CU_DEBUG) {
+            console.log(`listChildDocs(${parentDocId}) -> ${err?.response?.status || err?.message}`);
+        }
+        return [];
+    }
+}
+
+async function pageListingMeta(docId) {
+    try {
+        const { data } = await withBackoff(() =>
+            v3.get(`/workspaces/${WORKSPACE_ID}/docs/${docId}/pages`, {
+                params: { max_page_depth: -1 },
+            })
         );
         return Array.isArray(data) ? data : (data?.pages || []);
-    } catch (e) {
-        if (CU_DEBUG) console.log(`listPagesMeta(${docId}) -> ${e.status || e.message}`);
+    } catch (err) {
+        if (CU_DEBUG) {
+            console.log(`pageListingMeta(${docId}) -> ${err?.response?.status || err?.message}`);
+        }
         return [];
     }
 }
@@ -112,8 +331,10 @@ async function fetchPageBody(docId, pageId) {
     const fmts = ["text/md", "text/plain", "application/json", "text/html"];
     for (const fmt of fmts) {
         try {
-            const data = await withBackoff(() =>
-                v3Get(`/workspaces/${WORKSPACE_ID}/docs/${docId}/pages/${pageId}`, { content_format: fmt })
+            const { data } = await withBackoff(() =>
+                v3.get(`/workspaces/${WORKSPACE_ID}/docs/${docId}/pages/${pageId}`, {
+                    params: { content_format: fmt },
+                })
             );
             const c = data?.content;
             if (!c) continue;
@@ -136,216 +357,178 @@ async function fetchPageBody(docId, pageId) {
             const t = String(c).trim();
             if (t) return t;
         } catch {
-            // try next
+            // ignore; try next format
         }
     }
     return "";
 }
 
-/* ---- [system] parsing ---- */
-
-function prepareSystemSource(v = "") {
-    let s = String(v);
-
-    // decode a few basic HTML entities (ClickUp sometimes returns these)
-    const map = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'" };
-    s = s.replace(/&(amp|lt|gt|quot|#39);/g, m => map[m] || m);
-
-    // ClickUp sometimes escapes brackets like \[system]
-    s = s.replace(/\\\[/g, "[").replace(/\\\]/g, "]");
-
-    // remove zero-width chars that sometimes break regex matching
-    s = s.replace(/[\u200B-\u200D\uFEFF]/g, "");
-
-    return s;
-}
-
-function normalizeStatus(s) {
-    const v = (s || "").toString().trim().toLowerCase().replace(/[,;]+$/, "");
-    if (v === "warn") return "warning";
-    if (v === "incident") return "error";
-    if (v === "degraded") return "warning";
-    if (["ok", "warning", "error"].includes(v)) return v;
-    return "ok";
-}
-
-function normalizeSolved(s) {
-    const v = (s || "").toString().trim().toLowerCase().replace(/[,;]+$/, "");
-    if (["yes", "true", "1"].includes(v)) return "yes";
-    if (["no", "false", "0"].includes(v)) return "no";
-    return "no";
-}
-
-function normalizeDisplay(s) {
-    const v = (s || "").toString().trim().toLowerCase().replace(/[,;]+$/, "");
-    if (["yes", "true", "1", "on"].includes(v)) return "yes";
-    if (["no", "false", "0", "off"].includes(v)) return "no";
-    return "";
-}
-
-function parseDomains(v) {
-    // [] = global (everyone)
-    if (v == null) return [];
-    const raw = String(v).trim();
-    if (!raw || raw === "@") return [];
-    const parts = raw
-        .split(",")
-        .map(x => x.trim().toLowerCase())
-        .filter(Boolean)
-        .map(x => x.startsWith("www.") ? x.slice(4) : x);
-
-    if (parts.includes("@")) return [];
-    return Array.from(new Set(parts));
-}
-
-function extractAllSystemEntries(body = "") {
-    const results = [];
-    const plain = prepareSystemSource(body);
-
-    const re = /\[system\]([\s\S]*?)\[\/system\]/gi;
-    let m;
-
-    while ((m = re.exec(plain)) !== null) {
-        const innerRaw = (m[1] || "");
-        const inner = innerRaw.trim();
-        if (!inner) continue;
-
-        const obj = {};
-        let currentKey = null;
-
-        for (const rawLine of innerRaw.split(/\r?\n/)) {
-            const lineTrimmed = rawLine.trim();
-
-            if (!lineTrimmed) {
-                if (currentKey === "message") obj.message = (obj.message || "") + "\n";
-                continue;
-            }
-
-            // allow empty value after ":" (important for "message:" on its own line)
-            const kv = lineTrimmed.match(/^([A-Za-z0-9_.-]+)\s*[:=]\s*(.*)$/);
-            if (kv) {
-                const key = kv[1].toLowerCase();
-                let val = (kv[2] || "").trim().replace(/[,;]+$/, "").trim();
-
-                if (key === "message") {
-                    // support message: <empty> then continuation lines
-                    obj.message = (obj.message || "");
-                    if (val) obj.message += val;
-                    currentKey = "message";
-                } else {
-                    obj[key] = val;
-                    currentKey = key;
-                }
-                continue;
-            }
-
-            // continuation lines (only for message)
-            if (currentKey === "message") {
-                obj.message = (obj.message || "");
-                if (obj.message && !obj.message.endsWith("\n")) obj.message += "\n";
-                obj.message += rawLine;
+async function mapLimit(items, limit, worker) {
+    const results = new Array(items.length);
+    let i = 0;
+    async function run() {
+        while (true) {
+            const idx = i++;
+            if (idx >= items.length) break;
+            try {
+                results[idx] = await worker(items[idx], idx);
+            } catch {
+                results[idx] = undefined;
             }
         }
-
-        const displayNorm = normalizeDisplay(obj.display);
-
-        // Visibility logic (backwards compatible):
-        // - If "display" exists -> it controls visibility
-        // - Else -> legacy "solved" must be "no"
-        if (displayNorm) {
-            if (displayNorm !== "yes") continue;
-        } else {
-            if (normalizeSolved(obj.solved) !== "no") continue;
-        }
-
-        results.push({
-            name: obj.name || "System message",
-            status: normalizeStatus(obj.status),
-            display: displayNorm || "yes",
-            domains: parseDomains(obj.domain),
-            message: obj.message || "",
-        });
     }
-
+    const n = Math.min(limit, items.length);
+    await Promise.all(Array.from({ length: n }, run));
     return results;
 }
 
-export async function harvestSystemMessagesFromDocs() {
-    const docs = await listAllDocs();
-    if (CU_DEBUG) console.log(`Docs: ${docs.length}`);
+async function collectSystemFromDoc(doc, depth = 0) {
+    if (depth > MAX_DEPTH) return [];
 
-    const messages = [];
+    const pages = await pageListingMeta(doc.id);
 
-    for (const doc of docs) {
-        const pages = await listPagesMeta(doc.id);
+    const recentPages = cutoffMs
+        ? pages.filter((p) => (Number(p?.date_updated) || 0) >= cutoffMs)
+        : pages;
 
-        const recentPages = cutoffMs
-            ? pages.filter(p => (Number(p?.date_updated) || 0) >= cutoffMs)
-            : pages;
+    if (CU_DEBUG) {
+        console.log(
+            `doc "${doc.name}" (${doc.id}): pages=${pages.length}, recent=${recentPages.length}` +
+            (cutoffMs ? ` since ${new Date(cutoffMs).toISOString()}` : "")
+        );
+    }
+    if (!recentPages.length) return [];
 
-        if (CU_DEBUG) {
+    const bodies = await mapLimit(recentPages, CONCURRENCY, (p) => fetchPageBody(doc.id, p.id));
+
+    const entries = [];
+    for (let i = 0; i < recentPages.length; i++) {
+        const p = recentPages[i];
+        const body = bodies[i];
+        if (!body) continue;
+
+        if (DO_DUMP) {
+            try {
+                fs.mkdirSync(dumpDir, { recursive: true });
+                const fname = `${sanitizeFile(doc.id)}-${sanitizeFile(p.id)}.txt`;
+                fs.writeFileSync(path.join(dumpDir, fname), body || "");
+            } catch {
+                // ignore
+            }
+        }
+
+        if (TRACE_PAGES) {
+            const prev = (body || "").slice(0, 140).replace(/\s+/g, " ").trim();
             console.log(
-                `doc "${doc.name}": pages=${pages.length}, recent=${recentPages.length}` +
-                (cutoffMs ? ` since ${new Date(cutoffMs).toISOString()}` : "")
+                `   - page ${p.id} "${p.name}" → ${body ? "ok" : "empty"}` + (prev ? " | " + prev : "")
             );
         }
 
-        const bodies = await mapLimit(recentPages, CONCURRENCY, async (p) => {
-            const body = await fetchPageBody(doc.id, p.id);
-            if (TRACE_PAGES) console.log(` - page "${p.name}" -> ${body ? "ok" : "empty"}`);
-            return { page: p, body };
-        });
+        const found = extractAllSystemEntries(body);
+        for (const e of found) {
+            if (TRACE_SYS) {
+                console.log(`      • SYSTEM "${p.name}" -> ${e.status}: "${e.name}" msg[${e.message.length}]`);
+            }
+            entries.push({
+                ...e,
+                doc: doc.name,
+                page: p.name,
+                updated: p.date_updated ? new Date(Number(p.date_updated)).toISOString() : null,
+            });
+        }
+    }
 
-        for (const entry of bodies) {
-            if (!entry?.body) continue;
+    if (MAX_DEPTH > depth) {
+        const children = await listChildDocs(doc.id);
+        for (const child of children) {
+            const more = await collectSystemFromDoc(child, depth + 1);
+            entries.push(...more);
+        }
+    }
 
-            const found = extractAllSystemEntries(entry.body);
-            for (const f of found) {
-                messages.push({
-                    ...f,
-                    doc_id: doc.id,
-                    doc_name: doc.name,
-                    page_id: entry.page.id,
-                    page_name: entry.page.name,
-                    updated: entry.page.date_updated
-                        ? new Date(Number(entry.page.date_updated)).toISOString()
-                        : null,
-                });
+    return entries;
+}
+
+// ---------- main ----------
+export async function updateSystemJsonFromClickUp() {
+    console.log(
+        "🔎 Scanning Docs for [system] blocks…" +
+        (cutoffMs ? ` (delta since ${new Date(cutoffMs).toISOString()})` : " (full scan)")
+    );
+
+    const docs = await listAllDocs();
+    console.log(
+        `📄 Found ${docs.length} doc(s)` + (DOC_NAME_FILTER ? ` (name filter: ${DOC_NAME_FILTER})` : "") + "."
+    );
+
+    let all = [];
+    let skippedDocs = 0;
+
+    for (const doc of docs) {
+        try {
+            const entries = await collectSystemFromDoc(doc, 0);
+            if (!entries.length) {
+                skippedDocs++;
+                continue;
+            }
+            all.push(...entries);
+        } catch (err) {
+            skippedDocs++;
+            if (CU_DEBUG) {
+                console.warn(`⚠️ Error in doc "${doc?.name || doc?.id}": ${err?.message || err}`);
             }
         }
     }
 
+    // Only visible entries should exist here already, but keep it bulletproof:
+    const visible = all.filter((m) => m.display === "yes");
+
+    // Sort: error > warning > ok; then newest updated
     const sev = { error: 0, warning: 1, ok: 2 };
-    messages.sort((a, b) => {
+    visible.sort((a, b) => {
         const sa = sev[a.status] ?? 9;
         const sb = sev[b.status] ?? 9;
         if (sa !== sb) return sa - sb;
         return (Date.parse(b.updated || "") || 0) - (Date.parse(a.updated || "") || 0);
     });
 
-    const overall =
-        messages.some(m => m.status === "error") ? "error" :
-            messages.some(m => m.status === "warning") ? "warn" :
-                "ok";
+    // Widget expects ok|warn|error
+    const hasError = visible.some((m) => m.status === "error");
+    const hasWarn = visible.some((m) => m.status === "warning");
+    const overall = hasError ? "error" : hasWarn ? "warn" : "ok";
 
-    return { overall, messages, updatedAt: new Date().toISOString() };
+    const payload = {
+        overall,
+        updatedAt: new Date().toISOString(), // fetch time
+        messages: visible.map((m) => ({
+            name: m.name,
+            status: m.status,
+            display: m.display,
+            domains: Array.isArray(m.domains) ? m.domains : [], // [] = global
+            message: m.message,
+            doc: m.doc,
+            page: m.page,
+            updated: m.updated,
+        })),
+    };
+
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), "utf8");
+
+    console.log(
+        `\n🧾 Wrote ${payload.messages.length} visible system message(s) (docs with no matches: ${skippedDocs}) → ${outPath}`
+    );
+
+    return payload;
 }
 
-// Optional CLI helper (keeps old module behavior intact)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const outFile = path.join(__dirname, "..", "..", "data", "system.json");
-
+// CLI
 const isMain = import.meta.url === `file://${process.argv[1]}`;
 if (isMain) {
-    harvestSystemMessagesFromDocs()
-        .then((data) => {
-            fs.mkdirSync(path.dirname(outFile), { recursive: true });
-            fs.writeFileSync(outFile, JSON.stringify(data, null, 2), "utf8");
-            console.log(`✅ Wrote ${data.messages.length} message(s) -> ${outFile}`);
-        })
+    updateSystemJsonFromClickUp()
+        .then(() => process.exit(0))
         .catch((err) => {
-            console.error("❌ Error:", err?.message || err);
+            console.error("❌ Error:", err?.response?.data || err?.message || err);
             process.exit(1);
         });
 }
