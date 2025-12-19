@@ -1,7 +1,16 @@
 {
-  "overall": "warn",
-  "updatedAt": "2025-12-19T12:21:21.181Z",
+  "overall": "error",
+  "updatedAt": "2025-12-19T12:35:11.907Z",
   "messages": [
+    {
+      "name": "Kinsta server downtime",
+      "status": "error",
+      "display": "yes",
+      "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\n What this means for you:\nTransactional emails may arrive later than usual\nNo data has been lost\nNo action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
+      "doc": "System messages",
+      "page": "System messages",
+      "updated": "2025-12-19T12:26:44.414Z"
+    },
     {
       "name": "Fejl i plugin Gravity",
       "status": "warning",
@@ -9,7 +18,7 @@
       "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\nWhat this means for you:\nTransactional emails may arrive later than usual\nNo data has been lost\nNo action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
       "doc": "System messages",
       "page": "System messages",
-      "updated": "2025-12-19T10:53:46.492Z"
+      "updated": "2025-12-19T12:26:44.414Z"
     }
   ]
 }
