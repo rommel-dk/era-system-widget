@@ -1,17 +1,7 @@
 {
-  "overall": "error",
-  "updatedAt": "2025-12-19T13:42:44.379Z",
+  "overall": "ok",
+  "updatedAt": "2025-12-19T13:54:55.125Z",
   "messages": [
-    {
-      "name": "Kinsta server downtime",
-      "status": "error",
-      "display": "yes",
-      "domains": [],
-      "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\n What this means for you:\nTransactional emails may arrive later than usual\nNo data has been lost\nNo action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
-      "doc": "System messages",
-      "page": "System messages",
-      "updated": "2025-12-19T13:35:21.268Z"
-    },
     {
       "name": "Fejl i plugin Gravity",
       "status": "ok",
@@ -23,7 +13,19 @@
       "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\nWhat this means for you:\nTransactional emails may arrive later than usual\nNo data has been lost\nNo action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
       "doc": "System messages",
       "page": "System messages",
-      "updated": "2025-12-19T13:35:21.268Z"
+      "updated": "2025-12-19T13:50:16.564Z"
+    },
+    {
+      "name": "Supportopgave #323495 donationswidget",
+      "status": "ok",
+      "display": "yes",
+      "domains": [
+        "ventilen.localhost"
+      ],
+      "message": "We are currently experiencing delayed email delivery caused by an upstream issue with AWS SES.\n What this means for you:\nTransactional emails may arrive later than usual\nNo data has been lost\nNo action is required from your side\nOur team is monitoring the situation and will update this message as soon as we have more information.\nLast update: 18 Dec 2025, 15:30 CET",
+      "doc": "System messages",
+      "page": "System messages",
+      "updated": "2025-12-19T13:50:16.564Z"
     }
   ]
 }
