@@ -31,7 +31,6 @@
 		h1 { font-size:16px;margin:0 }
 		.subtitle { font-size:12px;color:var(--muted);margin-top:2px }
 
-		/* STATUS ROW */
 		.status-row {
 			display:flex;justify-content:space-between;align-items:center;
 			padding:10px 12px;margin:12px 0;
@@ -44,7 +43,6 @@
 		.dot.error{background:var(--error);box-shadow:0 0 0 6px rgba(220,38,38,.18)}
 		.tag { font-size:11px;padding:3px 8px;border-radius:999px;font-weight:500 }
 
-		/* SYSTEM MESSAGES */
 		h2 { font-size:13px;margin:0 0 4px }
 		.desc { font-size:12px;color:var(--muted);margin-bottom:6px }
 		ul { padding-left:18px;margin:0 }
@@ -59,7 +57,6 @@
 		.chip.error{background:#fee2e2;color:#991b1b;border-color:#fecaca}
 		small{display:block;color:var(--muted);margin-top:2px;white-space:pre-wrap}
 
-		/* CONTACT FORM */
 		.contact { border-top:1px solid #e5e7eb;margin-top:14px;padding-top:12px }
 		label { font-size:11px;color:var(--muted);display:block;margin-bottom:3px }
 		input, textarea {
@@ -81,7 +78,6 @@
 <body>
 <div class="widget">
 
-    <!-- HEADER -->
     <div class="header">
         <div class="logo">era</div>
         <div>
@@ -90,7 +86,6 @@
         </div>
     </div>
 
-    <!-- STATUS -->
     <div class="status-row">
         <div class="status-main">
             <div class="dot ok" id="dot"></div>
@@ -102,16 +97,13 @@
         <span class="tag" id="status-tag">Operational</span>
     </div>
 
-    <!-- MESSAGES -->
     <h2>System messages</h2>
     <div class="desc" id="desc"></div>
     <ul id="list"></ul>
 
-    <!-- CONTACT (static-host safe) -->
     <div class="contact">
         <h2>Contact us</h2>
         <form id="contact-form">
-            <input type="hidden" name="client_id" id="client-id" value="">
             <label>Name</label>
             <input required name="name">
             <label>Email</label>
@@ -128,22 +120,9 @@
 </div>
 
 <script>
-    // Pull client_id from querystring for logging if you want it later
-    (function () {
-        const params = new URLSearchParams(window.location.search);
-        const clientId = params.get("client_id") || "";
-        document.getElementById("client-id").value = clientId;
-    })();
-
-    // If embedded in an iframe, auto-resize
-    function sendHeight() {
-        const height = document.documentElement.scrollHeight;
-        if (window.parent && window.parent !== window) {
-            window.parent.postMessage({ type: "ERA_WIDGET_RESIZE", height }, "*");
-        }
-    }
-    window.addEventListener("load", () => setTimeout(sendHeight, 50));
-    window.addEventListener("resize", sendHeight);
+    // Relative should work, but we add a fallback to absolute for GitHub Pages quirks
+    const STATUS_URL_REL = "./data/system.json";
+    const STATUS_URL_ABS = "https://rommel-dk.github.io/era-system-widget/data/system.json";
 
     const dot = document.getElementById("dot");
     const title = document.getElementById("status-title");
@@ -152,94 +131,98 @@
     const list = document.getElementById("list");
     const desc = document.getElementById("desc");
 
-    // Because this file is /widget/index.html, the JSON is /data/system.json
-    const STATUS_URL = "../data/system.json";
-
     const esc = s => String(s ?? "")
         .replaceAll("&","&amp;").replaceAll("<","&lt;")
         .replaceAll(">","&gt;").replaceAll('"',"&quot;");
 
+    function sendHeight() {
+        if (window.parent !== window) {
+            window.parent.postMessage(
+                { type: "ERA_WIDGET_RESIZE", height: document.documentElement.scrollHeight },
+                "*"
+            );
+        }
+    }
+
+    async function fetchJson(url) {
+        const res = await fetch(url, { cache: "no-store" });
+        const ct = res.headers.get("content-type") || "";
+        const text = await res.text();
+
+        console.log("FETCH", url, "=>", res.status, ct);
+
+        if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+        if (!ct.includes("application/json")) {
+            // If GitHub ever serves an HTML error page, JSON.parse will explode
+            throw new Error(`Expected JSON, got "${ct}". First bytes: ${text.slice(0, 80)}`);
+        }
+        return JSON.parse(text);
+    }
+
+    function render(data) {
+        dot.className = "dot " + (data.overall === "error" ? "error" : data.overall === "warn" ? "warn" : "ok");
+
+        tag.style.background = "";
+        tag.style.color = "";
+
+        if (data.overall === "error") {
+            title.textContent = "Service disruption";
+            sub.textContent = "Active incident";
+            tag.textContent = "Incident";
+            tag.style.background="#fee2e2"; tag.style.color="#991b1b";
+            desc.textContent = "We’re actively working on incidents.";
+        } else if (data.overall === "warn") {
+            title.textContent = "Degraded performance";
+            sub.textContent = "Some systems affected";
+            tag.textContent = "Degraded";
+            tag.style.background="#fef9c3"; tag.style.color="#854d0e";
+            desc.textContent = "Some services are currently impacted.";
+        } else {
+            title.textContent = "All systems operational";
+            sub.textContent = "No incidents reported";
+            tag.textContent = "Operational";
+            tag.style.background="#dcfce7"; tag.style.color="#166534";
+            desc.textContent = "Everything looks good.";
+        }
+
+        list.innerHTML = "";
+        (data.messages || []).forEach(m => {
+            const li = document.createElement("li");
+            const lvl = (m.status === "warning" ? "warning" : m.status === "error" ? "error" : "ok");
+            li.innerHTML =
+                `<span class="chip ${lvl}">${lvl.toUpperCase()}</span>` +
+                `<strong>${esc(m.name)}</strong>` +
+                `<small>${esc(m.message)}</small>`;
+            list.appendChild(li);
+        });
+
+        sendHeight();
+    }
+
     async function loadStatus() {
         try {
-            const res = await fetch(STATUS_URL, { cache: "no-store" });
-            if (!res.ok) throw new Error("Failed to load status JSON");
-            const data = await res.json();
+            console.log("PAGE:", location.href);
+            console.log("TRY REL:", new URL(STATUS_URL_REL, location.href).href);
 
-            dot.className = "dot " + (data.overall === "error" ? "error" : data.overall === "warn" ? "warn" : "ok");
+            const data = await fetchJson(STATUS_URL_REL);
+            render(data);
+        } catch (err1) {
+            console.error("Relative fetch failed:", err1);
 
-            // Reset tag styles (important when switching states)
-            tag.style.background = "";
-            tag.style.color = "";
-
-            if (data.overall === "error") {
-                title.textContent = "Service disruption";
-                sub.textContent = "Active incident";
-                tag.textContent = "Incident";
-                tag.style.background="#fee2e2"; tag.style.color="#991b1b";
-                desc.textContent = "We’re actively working on incidents.";
-            } else if (data.overall === "warn") {
-                title.textContent = "Degraded performance";
-                sub.textContent = "Some systems affected";
-                tag.textContent = "Degraded";
-                tag.style.background="#fef9c3"; tag.style.color="#854d0e";
-                desc.textContent = "Some services are currently impacted.";
-            } else {
-                title.textContent = "All systems operational";
-                sub.textContent = "No incidents reported";
-                tag.textContent = "Operational";
-                tag.style.background="#dcfce7"; tag.style.color="#166534";
-                desc.textContent = "Everything looks good.";
+            try {
+                console.log("TRY ABS:", STATUS_URL_ABS);
+                const data = await fetchJson(STATUS_URL_ABS);
+                render(data);
+            } catch (err2) {
+                console.error("Absolute fetch failed:", err2);
+                desc.textContent = "Status unavailable right now.";
+                sendHeight();
             }
-
-            list.innerHTML = "";
-            (data.messages || []).forEach(m => {
-                const li = document.createElement("li");
-                const lvl = m.status || "ok";
-                li.innerHTML =
-                    `<span class="chip ${lvl}">${esc(lvl).toUpperCase()}</span>` +
-                    `<strong>${esc(m.name)}</strong>` +
-                    `<small>${esc(m.message)}</small>`;
-                list.appendChild(li);
-            });
-
-            sendHeight();
-        } catch (err) {
-            desc.textContent = "Status unavailable right now.";
-            sendHeight();
         }
     }
 
     loadStatus();
-
-    // CONTACT FORM:
-    // GitHub Pages cannot send email by itself.
-    // You must provide a backend endpoint (Cloudflare Worker / WP endpoint / Vercel / etc.)
-    // If you later add CONTACT_ENDPOINT, it will work without changing the UI.
-    const CONTACT_ENDPOINT = ""; // e.g. "https://yourdomain.com/api/widget-contact"
-
-    const form = document.getElementById("contact-form");
-    const formStatus = document.getElementById("form-status");
-
-    form.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        formStatus.textContent = "Sending…";
-
-        if (!CONTACT_ENDPOINT) {
-            formStatus.textContent = "Contact form not enabled on this hosted version.";
-            return;
-        }
-
-        try {
-            const res = await fetch(CONTACT_ENDPOINT, { method: "POST", body: new FormData(form) });
-            if (!res.ok) throw new Error("Request failed");
-            formStatus.textContent = "Message sent";
-            form.reset();
-        } catch {
-            formStatus.textContent = "Something went wrong";
-        } finally {
-            sendHeight();
-        }
-    });
 </script>
+
 </body>
 </html>
