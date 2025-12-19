@@ -13,65 +13,110 @@
 			--font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 		}
 
-		body { margin:0; font-family:var(--font); background:transparent; color:var(--text); }
+		body {
+			margin:0;
+			font-family:var(--font);
+			background:transparent;
+			color:var(--text);
+		}
 
 		.widget {
-			max-width:480px; margin:0 auto; background:var(--bg);
-			border-radius:var(--radius); border:1px solid var(--border);
-			box-shadow:var(--shadow); padding:18px 20px 22px;
+			max-width:480px;
+			margin:0 auto;
+			background:var(--bg);
+			border-radius:var(--radius);
+			border:1px solid var(--border);
+			box-shadow:var(--shadow);
+			padding:18px 20px 22px;
 			box-sizing:border-box;
 		}
 
-		.header { display:flex; gap:12px; margin-bottom:8px; align-items:center; }
-		.logo {
-			width:40px;height:40px;border-radius:999px;background:#0f172a;
-			display:flex;align-items:center;justify-content:center;
-			color:#fff;font-weight:700;
+		.header {
+			display:flex;
+			gap:12px;
+			margin-bottom:8px;
+			align-items:center;
 		}
-		h1 { font-size:16px;margin:0 }
-		.subtitle { font-size:12px;color:var(--muted);margin-top:2px }
+
+		.logo {
+			width:40px;
+			height:40px;
+			border-radius:999px;
+			background:#0f172a;
+			display:flex;
+			align-items:center;
+			justify-content:center;
+			color:#fff;
+			font-weight:700;
+		}
+
+		h1 { font-size:16px; margin:0 }
+		.subtitle { font-size:12px; color:var(--muted); margin-top:2px }
 
 		.status-row {
-			display:flex;justify-content:space-between;align-items:center;
-			padding:10px 12px;margin:12px 0;
-			background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;
+			display:flex;
+			justify-content:space-between;
+			align-items:center;
+			padding:10px 12px;
+			margin:12px 0;
+			background:#f9fafb;
+			border:1px solid #e5e7eb;
+			border-radius:10px;
 		}
-		.status-main { display:flex;gap:10px;align-items:center }
-		.dot { width:12px;height:12px;border-radius:999px }
-		.dot.ok{background:var(--ok);box-shadow:0 0 0 6px rgba(22,163,74,.18)}
-		.dot.warn{background:var(--warn);box-shadow:0 0 0 6px rgba(250,204,21,.18)}
-		.dot.error{background:var(--error);box-shadow:0 0 0 6px rgba(220,38,38,.18)}
-		.tag { font-size:11px;padding:3px 8px;border-radius:999px;font-weight:500 }
 
-		h2 { font-size:13px;margin:0 0 4px }
-		.desc { font-size:12px;color:var(--muted);margin-bottom:6px }
-		ul { padding-left:18px;margin:0 }
-		li { font-size:12px;margin-bottom:10px }
+		.status-main { display:flex; gap:10px; align-items:center }
+
+		.dot {
+			width:12px;
+			height:12px;
+			border-radius:999px;
+		}
+
+		.dot.ok {
+			background:var(--ok);
+			box-shadow:0 0 0 6px rgba(22,163,74,.18);
+		}
+		.dot.warn {
+			background:var(--warn);
+			box-shadow:0 0 0 6px rgba(250,204,21,.18);
+		}
+		.dot.error {
+			background:var(--error);
+			box-shadow:0 0 0 6px rgba(220,38,38,.18);
+		}
+
+		.tag {
+			font-size:11px;
+			padding:3px 8px;
+			border-radius:999px;
+			font-weight:500;
+		}
+
+		h2 { font-size:13px; margin:0 0 4px }
+		.desc { font-size:12px; color:var(--muted); margin-bottom:6px }
+		.last-updated { font-size:11px; color:var(--muted); margin-bottom:10px }
+
+		ul { padding-left:18px; margin:0 }
+		li { font-size:12px; margin-bottom:10px }
+
 		.chip {
-			display:inline-block;font-size:10px;font-weight:700;
-			padding:2px 8px;border-radius:999px;margin-right:6px;
-			border:1px solid transparent;
+			display:inline-block;
+			font-size:10px;
+			font-weight:700;
+			padding:2px 8px;
+			border-radius:999px;
+			margin-right:6px;
 		}
-		.chip.ok{background:#dcfce7;color:#166534;border-color:#bbf7d0}
-		.chip.warning{background:#fef9c3;color:#854d0e;border-color:#fde68a}
-		.chip.error{background:#fee2e2;color:#991b1b;border-color:#fecaca}
-		small{display:block;color:var(--muted);margin-top:2px;white-space:pre-wrap}
+		.chip.ok { background:#dcfce7; color:#166534 }
+		.chip.warning { background:#fef9c3; color:#854d0e }
+		.chip.error { background:#fee2e2; color:#991b1b }
 
-		.contact { border-top:1px solid #e5e7eb;margin-top:14px;padding-top:12px }
-		label { font-size:11px;color:var(--muted);display:block;margin-bottom:3px }
-		input, textarea {
-			width:100%;font-size:13px;padding:7px 9px;
-			border-radius:8px;border:1px solid #d1d5db;
-			font-family:inherit;box-sizing:border-box;
+		small {
+			display:block;
+			color:var(--muted);
+			margin-top:2px;
+			white-space:pre-wrap;
 		}
-		textarea{min-height:70px;resize:vertical}
-		button {
-			background:var(--accent);color:#fff;border:none;
-			padding:7px 14px;border-radius:999px;
-			font-size:13px;font-weight:500;cursor:pointer;
-		}
-		.form-row { display:flex;justify-content:space-between;align-items:center;margin-top:6px }
-		.form-status { font-size:11px;color:var(--muted) }
     </style>
 </head>
 
@@ -99,129 +144,116 @@
 
     <h2>System messages</h2>
     <div class="desc" id="desc"></div>
+    <div class="last-updated" id="last-updated"></div>
     <ul id="list"></ul>
-
-    <div class="contact">
-        <h2>Contact us</h2>
-        <form id="contact-form">
-            <label>Name</label>
-            <input required name="name">
-            <label>Email</label>
-            <input required type="email" name="email">
-            <label>Message</label>
-            <textarea required name="message"></textarea>
-            <div class="form-row">
-                <button type="submit">Send</button>
-                <span class="form-status" id="form-status"></span>
-            </div>
-        </form>
-    </div>
 
 </div>
 
 <script>
-    // Relative should work, but we add a fallback to absolute for GitHub Pages quirks
-    const STATUS_URL_REL = "./data/system.json";
-    const STATUS_URL_ABS = "https://rommel-dk.github.io/era-system-widget/data/system.json";
+    const STATUS_URL = "./data/system.json";
 
     const dot = document.getElementById("dot");
     const title = document.getElementById("status-title");
     const sub = document.getElementById("status-sub");
     const tag = document.getElementById("status-tag");
-    const list = document.getElementById("list");
     const desc = document.getElementById("desc");
+    const list = document.getElementById("list");
+    const lastUpdated = document.getElementById("last-updated");
 
     const esc = s => String(s ?? "")
-        .replaceAll("&","&amp;").replaceAll("<","&lt;")
-        .replaceAll(">","&gt;").replaceAll('"',"&quot;");
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;");
 
-    function sendHeight() {
-        if (window.parent !== window) {
-            window.parent.postMessage(
-                { type: "ERA_WIDGET_RESIZE", height: document.documentElement.scrollHeight },
-                "*"
-            );
-        }
+    function normalizeHost(h) {
+        const x = String(h || "").toLowerCase().trim();
+        return x.startsWith("www.") ? x.slice(4) : x;
     }
 
-    async function fetchJson(url) {
-        const res = await fetch(url, { cache: "no-store" });
-        const ct = res.headers.get("content-type") || "";
-        const text = await res.text();
-
-        console.log("FETCH", url, "=>", res.status, ct);
-
-        if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
-        if (!ct.includes("application/json")) {
-            // If GitHub ever serves an HTML error page, JSON.parse will explode
-            throw new Error(`Expected JSON, got "${ct}". First bytes: ${text.slice(0, 80)}`);
-        }
-        return JSON.parse(text);
+    function getCurrentDomain() {
+        const params = new URLSearchParams(location.search);
+        return normalizeHost(params.get("domain") || location.hostname);
     }
 
-    function render(data) {
-        dot.className = "dot " + (data.overall === "error" ? "error" : data.overall === "warn" ? "warn" : "ok");
+    function domainMatches(current, allowed) {
+        return current === allowed || current.endsWith("." + allowed);
+    }
 
-        tag.style.background = "";
-        tag.style.color = "";
-
-        if (data.overall === "error") {
-            title.textContent = "Service disruption";
-            sub.textContent = "Active incident";
-            tag.textContent = "Incident";
-            tag.style.background="#fee2e2"; tag.style.color="#991b1b";
-            desc.textContent = "We’re actively working on incidents.";
-        } else if (data.overall === "warn") {
-            title.textContent = "Degraded performance";
-            sub.textContent = "Some systems affected";
-            tag.textContent = "Degraded";
-            tag.style.background="#fef9c3"; tag.style.color="#854d0e";
-            desc.textContent = "Some services are currently impacted.";
-        } else {
-            title.textContent = "All systems operational";
-            sub.textContent = "No incidents reported";
-            tag.textContent = "Operational";
-            tag.style.background="#dcfce7"; tag.style.color="#166534";
-            desc.textContent = "Everything looks good.";
-        }
-
-        list.innerHTML = "";
-        (data.messages || []).forEach(m => {
-            const li = document.createElement("li");
-            const lvl = (m.status === "warning" ? "warning" : m.status === "error" ? "error" : "ok");
-            li.innerHTML =
-                `<span class="chip ${lvl}">${lvl.toUpperCase()}</span>` +
-                `<strong>${esc(m.name)}</strong>` +
-                `<small>${esc(m.message)}</small>`;
-            list.appendChild(li);
+    function filterByDomain(messages, currentDomain) {
+        return messages.filter(m => {
+            const domains = Array.isArray(m.domains) ? m.domains.map(normalizeHost) : [];
+            if (!domains.length) return true; // global
+            return domains.some(d => domainMatches(currentDomain, d));
         });
-
-        sendHeight();
     }
 
-    async function loadStatus() {
+    function computeOverall(msgs) {
+        if (msgs.some(m => m.status === "error")) return "error";
+        if (msgs.some(m => m.status === "warning")) return "warn";
+        return "ok";
+    }
+
+    function formatDate(iso) {
+        if (!iso) return "";
+        return new Date(iso).toLocaleString("en-GB", {
+            day:"2-digit", month:"short", year:"numeric",
+            hour:"2-digit", minute:"2-digit",
+            timeZone:"Europe/Copenhagen"
+        }) + " CET";
+    }
+
+    async function load() {
         try {
-            console.log("PAGE:", location.href);
-            console.log("TRY REL:", new URL(STATUS_URL_REL, location.href).href);
+            const res = await fetch(STATUS_URL, { cache:"no-store" });
+            const data = await res.json();
 
-            const data = await fetchJson(STATUS_URL_REL);
-            render(data);
-        } catch (err1) {
-            console.error("Relative fetch failed:", err1);
+            const domain = getCurrentDomain();
+            const visible = filterByDomain(data.messages || [], domain);
+            const overall = computeOverall(visible);
 
-            try {
-                console.log("TRY ABS:", STATUS_URL_ABS);
-                const data = await fetchJson(STATUS_URL_ABS);
-                render(data);
-            } catch (err2) {
-                console.error("Absolute fetch failed:", err2);
-                desc.textContent = "Status unavailable right now.";
-                sendHeight();
+            dot.className = "dot " + (overall === "error" ? "error" : overall === "warn" ? "warn" : "ok");
+
+            if (overall === "error") {
+                title.textContent = "Service disruption";
+                sub.textContent = "Active incident";
+                tag.textContent = "Incident";
+                tag.style.background="#fee2e2"; tag.style.color="#991b1b";
+                desc.textContent = "We’re actively working on incidents.";
+            } else if (overall === "warn") {
+                title.textContent = "Degraded performance";
+                sub.textContent = "Some systems affected";
+                tag.textContent = "Degraded";
+                tag.style.background="#fef9c3"; tag.style.color="#854d0e";
+                desc.textContent = "Some services are currently impacted.";
+            } else {
+                title.textContent = "All systems operational";
+                sub.textContent = "No incidents reported";
+                tag.textContent = "Operational";
+                tag.style.background="#dcfce7"; tag.style.color="#166534";
+                desc.textContent = "Everything looks good.";
             }
+
+            lastUpdated.textContent = data.updatedAt
+                ? "Last updated: " + formatDate(data.updatedAt)
+                : "";
+
+            list.innerHTML = "";
+            visible.forEach(m => {
+                const li = document.createElement("li");
+                li.innerHTML =
+                    `<span class="chip ${m.status}">${m.status.toUpperCase()}</span>` +
+                    `<strong>${esc(m.name)}</strong>` +
+                    `<small>${esc(m.message)}</small>`;
+                list.appendChild(li);
+            });
+
+        } catch {
+            desc.textContent = "Status unavailable right now.";
         }
     }
 
-    loadStatus();
+    load();
 </script>
 
 </body>
