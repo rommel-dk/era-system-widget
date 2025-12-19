@@ -1,0 +1,29 @@
+# Copyright (C) 2025 Era
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Era Minimal Admin View\n"
+"Report-Msgid-Bugs-To: support@rommel.dk\n"
+"POT-Creation-Date: 2025-04-04 11:38+0200\n"
+"PO-Revision-Date: 2025-04-04 11:38+0200\n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: da_DK\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: Poedit 3.5\n"
+"X-Domain: era-era-minimal-admin-view\n"
+"X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;"
+"_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;"
+"esc_html__;esc_html_e;esc_html_x:1,2c\n"
+"X-Poedit-Basepath: ..\n"
+"X-Poedit-SearchPath-0: .\n"
+
+#: init.php:188
+msgid "Admin view: Minimal"
+msgstr "Adminvisning: Minimal"
+
+#: init.php:190
+msgid "Admin view: Advanced"
+msgstr "Adminvisning: Avanceret"

@@ -1,1 +1,0 @@
-<?php // MU plugin placeholder ?>
